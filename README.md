@@ -16,7 +16,7 @@ node scripts/cli.mjs --input tests/fixtures/same-failure.json
 node scripts/cli.mjs < tests/fixtures/same-failure.json
 ```
 
-후보 가설과 검사의 의미는 evidence를 읽은 호출자가 작성합니다. CLI는 fingerprint 계산, 동일 입력으로 수행한 검사 제외, 결과 분기의 판별 가능성, 권한과 정보가치 순위를 결정적으로 처리합니다. 후보와 과거 검사에는 실행 대상을 설명하는 `checkInput`을 포함해야 합니다. `inputDigest`는 `checkId + checkInput`의 canonical JSON에서 다시 계산하므로 digest, 질문 문구나 평가 점수만 바꿔 같은 검사를 다시 제안할 수 없습니다. 금지, 승인 필요, 명시적 허용 순으로 권한을 적용하며 read-only 검사도 자동 허용하지 않습니다. 확정 원인의 evidence는 episode inventory에 존재해야 하며 artifact digest와 가설 ID가 `supports` 관계로 결속돼야 합니다. 단일 보고서에서 둘 이상의 가설을 확정할 수 없습니다. 제안한 검사를 직접 실행하지 않습니다.
+후보 가설과 검사의 의미는 evidence를 읽은 호출자가 작성합니다. CLI는 fingerprint 계산, 동일 입력으로 수행한 검사 제외, 결과 분기의 판별 가능성, 권한과 정보가치 순위를 결정적으로 처리합니다. 후보와 과거 검사에는 실행 대상을 설명하는 `checkInput`을 포함해야 합니다. `inputDigest`는 `checkId + checkInput`의 canonical JSON에서 다시 계산하므로 digest, 질문 문구나 평가 점수만 바꿔 같은 검사를 다시 제안할 수 없습니다. 금지, 승인 필요, 명시적 허용 순으로 권한을 적용하며 read-only 검사도 자동 허용하지 않습니다. 각 evidence binding의 관계는 해당 가설의 `supportingEvidence` 또는 `contradictingEvidence`에도 정확히 기록돼야 합니다. 확정 원인의 evidence는 episode inventory에 존재하고 artifact digest와 가설 ID가 `supports` 관계로 결속돼야 하며, `refutes` binding이 하나라도 있으면 확정할 수 없습니다. 단일 보고서에서 둘 이상의 가설을 확정할 수 없습니다. 제안한 검사를 직접 실행하지 않습니다.
 
 생성한 보고서는 다음처럼 다시 검사할 수 있습니다.
 

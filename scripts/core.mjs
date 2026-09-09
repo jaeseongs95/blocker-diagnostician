@@ -115,6 +115,7 @@ export function validateInput(input) {
   if (confirmedHypotheses.length > 1) throw new InputError("Only one confirmed hypothesis is supported by DiagnosisReport.v1.");
 
   const bindingKeys = new Set();
+  const bindingPairKeys = new Set();
   const evidenceDigests = new Map();
   for (const binding of input.evidenceBindings) {
     if (!evidenceInventory.has(binding.evidenceRef)) throw new InputError(`evidence binding references evidence outside the failure episode inventory: ${binding.evidenceRef}.`);
@@ -125,6 +126,21 @@ export function validateInput(input) {
     const key = canonicalJson({ ...binding, hypothesisIds: [...binding.hypothesisIds].sort() });
     if (bindingKeys.has(key)) throw new InputError(`duplicate evidence binding for ${binding.evidenceRef}.`);
     bindingKeys.add(key);
+    for (const id of binding.hypothesisIds) {
+      const hypothesis = input.candidateHypotheses.find((item) => item.id === id);
+      const pairKey = canonicalJson({ evidenceRef: binding.evidenceRef, hypothesisId: id, relation: binding.relation });
+      if (bindingPairKeys.has(pairKey)) throw new InputError(`duplicate ${binding.relation} evidence binding for ${binding.evidenceRef} and hypothesis ${id}.`);
+      bindingPairKeys.add(pairKey);
+      if (hypothesis.state === "confirmed" && binding.relation === "refutes") {
+        throw new InputError(`confirmed hypothesis ${id} cannot have a refuting evidence binding.`);
+      }
+      const reflected = binding.relation === "supports"
+        ? hypothesis.supportingEvidence.includes(binding.evidenceRef)
+        : hypothesis.contradictingEvidence.includes(binding.evidenceRef);
+      if (!reflected) {
+        throw new InputError(`${binding.relation} evidence binding ${binding.evidenceRef} is not reflected by hypothesis ${id}.`);
+      }
+    }
   }
   for (const hypothesis of input.candidateHypotheses) {
     for (const evidenceRef of hypothesis.supportingEvidence) {

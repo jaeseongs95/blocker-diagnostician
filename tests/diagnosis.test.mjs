@@ -241,6 +241,32 @@ test("confirmed cause rejects evidence bound to an unrelated hypothesis", async 
   assert.ok(errors.some((item) => item.includes("not bound to hypothesis H1")));
 });
 
+test("confirmed cause rejects an unreflected refuting evidence binding", async () => {
+  const request = await fixture("confirmed");
+  const cleanReport = analyzeDiagnosis(request);
+  request.evidenceBindings.push({
+    evidenceRef: "logs/one.txt",
+    artifactDigest: request.evidenceBindings[0].artifactDigest,
+    hypothesisIds: ["H1"],
+    relation: "refutes",
+  });
+
+  assert.deepEqual(request.candidateHypotheses[0].contradictingEvidence, []);
+  assert.throws(() => analyzeDiagnosis(request), /cannot have a refuting/u);
+  const errors = validateBoundReport(cleanReport, request);
+  assert.ok(errors.some((item) => item.includes("request cannot substantiate report")));
+  assert.notDeepEqual(errors, []);
+
+  const unreflectedSupport = await fixture("confirmed");
+  unreflectedSupport.evidenceBindings.push({
+    evidenceRef: "logs/one.txt",
+    artifactDigest: unreflectedSupport.evidenceBindings[0].artifactDigest,
+    hypothesisIds: ["H1"],
+    relation: "supports",
+  });
+  assert.throws(() => analyzeDiagnosis(unreflectedSupport), /not reflected by hypothesis H1/u);
+});
+
 test("an outcome cannot both support and refute the same hypothesis", async () => {
   const input = await fixture("same-failure");
   input.candidateTests[0].outcomes[0].refutesHypotheses.push("H1");
