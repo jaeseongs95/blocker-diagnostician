@@ -3,7 +3,7 @@
   "objective": "확인된 원인을 기록한다.",
   "expectedBehavior": "설정 파일을 읽는다.",
   "episodes": [
-    { "attemptId": "one", "operation": "node app.mjs", "stableFailureTuple": { "errorCode": "ENOENT", "topFrame": "config.read" }, "environmentDigest": "env:local", "changeSummary": "", "evidenceRefs": ["logs/one.txt"] }
+    { "attemptId": "one", "operation": "node app.mjs", "stableFailureTuple": { "errorCode": "ENOENT", "topFrame": "config.read" }, "environmentDigest": "env:local", "changeSummary": "", "evidenceRefs": ["logs/one.txt", "tool:file-stat"] }
   ],
   "lastKnownGood": { "identifier": "commit-old" },
   "constraints": [],

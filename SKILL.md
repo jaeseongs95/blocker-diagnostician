@@ -35,11 +35,11 @@ node scripts/validate-report.mjs --request failures.json --report diagnosis.json
 
 1. episode별 operation, stable tuple과 환경 digest를 보존해 cluster를 만든다.
 2. 관측 사실과 가설을 분리하고 각 가설의 지지·반박 evidence를 기록한다.
-3. 직접 evidence가 있는 가설만 `confirmed`로 인정한다.
+3. episode의 evidence inventory에 실제로 존재하는 직접 evidence가 있는 가설만 `confirmed`로 인정한다.
 4. 이미 같은 입력으로 실행한 검사는 후보에서 제외한다.
 5. 서로 다른 두 개 이상의 관측 결과가 가설을 다르게 지지·기각하는 검사만 판별 검사로 인정한다.
 6. 정보가치가 높은 검사를 우선하고, 같은 정보가치에서는 위험과 비용이 낮은 검사를 선택한다.
-7. 승인이 필요한 검사는 실행하지 않고 `NEEDS_APPROVAL`로 반환한다.
+7. `prohibitedChecks`, `approvalRequired`, `allowedChecks` 순으로 권한을 판정한다. read-only 검사도 명시적 허용 없이는 실행 가능하다고 보지 않으며, 승인이 필요한 검사는 실행하지 않고 `NEEDS_APPROVAL`로 반환한다.
 8. 새 관측이나 입력 변화가 없으면 같은 검사를 반복하지 않고 필요한 입력을 보고한다.
 
 ## 경계

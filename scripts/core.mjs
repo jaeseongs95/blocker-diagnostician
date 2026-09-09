@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { validateInputSchema, validateReportSchema } from "./schema-validation.mjs";
 
 export class InputError extends Error {
   constructor(message, details = null) {
@@ -53,6 +54,7 @@ function stringArray(value, name, { min = 0 } = {}) {
 
 export function validateInput(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new InputError("Input must be an object.");
+  if (!validateInputSchema(input)) throw new InputError("FailureEpisodeSet.v1 validation failed.", { errors: structuredClone(validateInputSchema.errors) });
   if (input.schemaVersion !== "1.0.0") throw new InputError("schemaVersion must be 1.0.0.");
   nonEmptyString(input.objective, "objective");
   nonEmptyString(input.expectedBehavior, "expectedBehavior");
@@ -77,6 +79,7 @@ export function validateInput(input) {
     throw new InputError("attemptedChecks, candidateHypotheses, and candidateTests must be arrays.");
   }
   const hypothesisIds = new Set();
+  const evidenceInventory = new Set(input.episodes.flatMap((episode) => episode.evidenceRefs));
   for (const hypothesis of input.candidateHypotheses) {
     nonEmptyString(hypothesis.id, "hypothesis.id");
     if (hypothesisIds.has(hypothesis.id)) throw new InputError(`Duplicate hypothesis id: ${hypothesis.id}`);
@@ -85,6 +88,9 @@ export function validateInput(input) {
     if (!["input", "state", "permission", "environment", "dependency", "timing", "implementation", "tooling", "unknown"].includes(hypothesis.causalLayer)) throw new InputError(`hypothesis ${hypothesis.id} causalLayer is invalid.`);
     stringArray(hypothesis.supportingEvidence, `hypothesis ${hypothesis.id} supportingEvidence`);
     stringArray(hypothesis.contradictingEvidence, `hypothesis ${hypothesis.id} contradictingEvidence`);
+    for (const ref of [...hypothesis.supportingEvidence, ...hypothesis.contradictingEvidence]) {
+      if (!evidenceInventory.has(ref)) throw new InputError(`hypothesis ${hypothesis.id} references evidence outside the failure episode inventory: ${ref}.`);
+    }
     if (!["open", "supported", "refuted", "confirmed"].includes(hypothesis.state)) throw new InputError(`hypothesis ${hypothesis.id} state is invalid.`);
     if (hypothesis.state === "confirmed" && (hypothesis.supportingEvidence.length === 0 || hypothesis.contradictingEvidence.length > 0)) throw new InputError(`confirmed hypothesis ${hypothesis.id} requires supporting evidence and no unresolved contradiction.`);
   }
@@ -147,6 +153,14 @@ function rankTests(left, right) {
   return right.informationGain - left.informationGain || riskRank[left.risk] - riskRank[right.risk] || left.cost - right.cost || left.checkId.localeCompare(right.checkId);
 }
 
+function authorizationDisposition(candidate, authorization) {
+  const authorities = [candidate.checkId, ...candidate.requiredAuthorization];
+  if (authorities.some((item) => authorization.prohibitedChecks.includes(item))) return "prohibited";
+  if (authorities.some((item) => authorization.approvalRequired.includes(item))) return "approval-required";
+  if (authorities.every((item) => authorization.allowedChecks.includes(item))) return "allowed";
+  return "approval-required";
+}
+
 export function analyzeDiagnosis(input) {
   validateInput(input);
   const failureClusters = clusterFailures(input);
@@ -195,14 +209,13 @@ export function analyzeDiagnosis(input) {
       notRepeated.push(candidate.checkId);
       continue;
     }
-    if (input.authorization.prohibitedChecks.includes(candidate.checkId) || candidate.requiredAuthorization.some((item) => input.authorization.prohibitedChecks.includes(item))) {
+    const disposition = authorizationDisposition(candidate, input.authorization);
+    if (disposition === "prohibited") {
       limitations.push(`Candidate ${candidate.checkId} is prohibited by the authorization boundary.`);
       continue;
     }
-    const missingAuthorization = candidate.requiredAuthorization.filter((item) => !input.authorization.allowedChecks.includes(item));
-    if (missingAuthorization.length > 0 || candidate.risk !== "read-only" && !input.authorization.allowedChecks.includes(candidate.checkId)) {
-      approvalNeeded.push(candidate);
-    } else available.push(candidate);
+    if (disposition === "approval-required") approvalNeeded.push(candidate);
+    else available.push(candidate);
   }
   if (notRepeated.length > 0) limitations.push(`Already attempted without changed input: ${notRepeated.join(", ")}.`);
   available.sort(rankTests);
@@ -230,6 +243,7 @@ export function analyzeDiagnosis(input) {
 export function validateReport(report, request = null) {
   const errors = [];
   if (!report || typeof report !== "object" || Array.isArray(report)) return ["report must be an object"];
+  if (!validateReportSchema(report)) errors.push(`report schema validation failed: ${JSON.stringify(validateReportSchema.errors)}`);
   if (report.schemaVersion !== "1.0.0") errors.push("report.schemaVersion must be 1.0.0");
   if (!Array.isArray(report.failureClusters)) errors.push("failureClusters must be an array");
   if (!Array.isArray(report.observations)) errors.push("observations must be an array");
@@ -240,6 +254,11 @@ export function validateReport(report, request = null) {
     if (!report.confirmedCause || !Array.isArray(report.confirmedCause.evidenceRefs) || report.confirmedCause.evidenceRefs.length === 0) errors.push("CAUSE_CONFIRMED requires direct evidence");
     const hypothesis = report.hypotheses?.find((item) => item.id === report.confirmedCause?.hypothesisId);
     if (!hypothesis || hypothesis.state !== "confirmed" || hypothesis.contradictingEvidence?.length > 0) errors.push("confirmedCause must reference an uncontradicted confirmed hypothesis");
+    if (!request) errors.push("the request is required to bind confirmed evidence to the failure episode inventory");
+    else {
+      const inventory = new Set(request.episodes.flatMap((episode) => episode.evidenceRefs));
+      for (const ref of report.confirmedCause?.evidenceRefs ?? []) if (!inventory.has(ref)) errors.push(`confirmedCause references evidence outside the failure episode inventory: ${ref}`);
+    }
   }
   if (["NEXT_TEST", "NEEDS_APPROVAL"].includes(report.verdict)) {
     const candidate = report.nextDiscriminatingTest;
@@ -252,9 +271,22 @@ export function validateReport(report, request = null) {
     }
   }
   if (request && Array.isArray(report.failureClusters)) {
-    const expectedIds = request.episodes.map((item) => item.attemptId).sort();
-    const actualIds = report.failureClusters.flatMap((item) => item.episodeIds).sort();
-    if (canonicalJson(expectedIds) !== canonicalJson(actualIds)) errors.push("failure clusters do not cover episodes exactly once");
+    try {
+      const expected = analyzeDiagnosis(request);
+      const expectedIds = request.episodes.map((item) => item.attemptId).sort();
+      const actualIds = report.failureClusters.flatMap((item) => item.episodeIds).sort();
+      if (canonicalJson(expectedIds) !== canonicalJson(actualIds)) errors.push("failure clusters do not cover episodes exactly once");
+      if (canonicalJson(expected.failureClusters) !== canonicalJson(report.failureClusters)) errors.push("failure cluster fingerprints do not match the request-derived clusters");
+      if (canonicalJson(expected.observations) !== canonicalJson(report.observations)) errors.push("observations do not match the failure episode evidence inventory");
+      if (canonicalJson(expected.hypotheses) !== canonicalJson(report.hypotheses)) errors.push("hypotheses do not match the validated request");
+      if (canonicalJson(expected.nextDiscriminatingTest) !== canonicalJson(report.nextDiscriminatingTest)) errors.push("selected test does not match request authorization, duplicate checks, and ranking");
+      if (canonicalJson(expected.confirmedCause) !== canonicalJson(report.confirmedCause)) errors.push("confirmedCause does not match request evidence");
+      if (canonicalJson(expected.limitations) !== canonicalJson(report.limitations)) errors.push("limitations do not match request authorization and evidence");
+      if (expected.recommendedNextAction !== report.recommendedNextAction) errors.push("recommendedNextAction does not match the validated selection");
+      if (expected.verdict !== report.verdict) errors.push(`verdict must be ${expected.verdict}`);
+    } catch (error) {
+      errors.push(`request cannot substantiate report: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
   return errors;
 }

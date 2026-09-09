@@ -15,7 +15,7 @@ node scripts/cli.mjs --input tests/fixtures/same-failure.json
 node scripts/cli.mjs < tests/fixtures/same-failure.json
 ```
 
-후보 가설과 검사의 의미는 evidence를 읽은 호출자가 작성합니다. CLI는 fingerprint 계산, 동일 입력으로 수행한 검사 제외, 결과 분기의 판별 가능성, 권한과 정보가치 순위를 결정적으로 처리합니다. 제안한 검사를 직접 실행하지 않습니다.
+후보 가설과 검사의 의미는 evidence를 읽은 호출자가 작성합니다. CLI는 fingerprint 계산, 동일 입력으로 수행한 검사 제외, 결과 분기의 판별 가능성, 권한과 정보가치 순위를 결정적으로 처리합니다. 금지, 승인 필요, 명시적 허용 순으로 권한을 적용하며 read-only 검사도 자동 허용하지 않습니다. 확정 원인의 evidence는 episode inventory에 실제로 존재해야 합니다. 제안한 검사를 직접 실행하지 않습니다.
 
 생성한 보고서는 다음처럼 다시 검사할 수 있습니다.
 

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agent-governance-skills.local/integration/provider-result.v1.schema.json",
+  "$id": "https://agent-governance-skills.local/blocker-diagnostician/integration/provider-result.v1.schema.json",
   "title": "ProviderResult.v1",
   "type": "object",
   "additionalProperties": false,
@@ -43,7 +43,7 @@
   "allOf": [
     {
       "if": { "properties": { "kind": { "const": "adapter-error" } } },
-      "then": { "properties": { "output": { "type": "null" }, "artifacts": { "maxItems": 0 }, "error": { "type": "object" } } }
+      "then": { "properties": { "output": { "type": "null" }, "artifacts": { "type": "array", "maxItems": 0 }, "error": { "type": "object" } } }
     },
     {
       "if": { "properties": { "kind": { "const": "output" } } },
