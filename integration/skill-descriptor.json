@@ -10,11 +10,12 @@
       "executionClass": "recovery",
       "phase": "failure-diagnosis",
       "phaseOrder": 10,
-      "requiredInputArtifacts": ["failure-episodes", "expected-behavior", "diagnostic-constraints"],
+      "requiredInputArtifacts": ["failure-episodes", "expected-behavior", "diagnostic-constraints", "frozen-request-artifact-digest"],
       "inputBindings": [
         { "targetArtifact": "failure-episodes", "sources": ["recovery-request:failure-episodes", "prior-run:stage-results"], "operation": "collect" },
         { "targetArtifact": "expected-behavior", "sources": ["recovery-request:expected-behavior"], "operation": "select" },
-        { "targetArtifact": "diagnostic-constraints", "sources": ["recovery-request:constraints", "recovery-request:authorization"], "operation": "combine" }
+        { "targetArtifact": "diagnostic-constraints", "sources": ["recovery-request:constraints", "recovery-request:authorization"], "operation": "combine" },
+        { "targetArtifact": "frozen-request-artifact-digest", "sources": ["recovery-request:artifact-digest"], "operation": "select" }
       ],
       "producedArtifacts": ["diagnosis-report"],
       "outputSchema": "contracts/diagnosis-report.v1.schema.json",

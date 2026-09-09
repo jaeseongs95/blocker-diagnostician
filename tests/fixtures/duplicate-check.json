@@ -8,7 +8,27 @@
   "lastKnownGood": null,
   "constraints": [],
   "authorization": { "allowedChecks": ["check-acl"], "approvalRequired": [], "prohibitedChecks": [] },
-  "attemptedChecks": [{ "checkId": "check-acl", "inputDigest": "input:same", "resultDigest": "result:old" }],
+  "evidenceBindings": [],
+  "attemptedChecks": [{
+    "checkId": "check-acl",
+    "inputDigest": "sha256:6e62d60c29160242c2404de2c4503673cf5480bc3fa7aa43b55d9c4a4e5e340e",
+    "resultDigest": "result:old",
+    "check": {
+      "checkId": "check-acl",
+      "checkInput": { "target": "dependency-cache", "environmentDigest": "env:local" },
+      "question": "ACL을 다시 확인한다.",
+      "preconditions": [],
+      "risk": "read-only",
+      "requiredAuthorization": [],
+      "outcomes": [
+        { "observation": "권한 없음", "supportsHypotheses": ["H1"], "refutesHypotheses": ["H2"] },
+        { "observation": "권한 있음", "supportsHypotheses": ["H2"], "refutesHypotheses": ["H1"] }
+      ],
+      "stopCondition": "한 번 확인 후 중단한다.",
+      "informationGain": 4,
+      "cost": 1
+    }
+  }],
   "candidateHypotheses": [
     { "id": "H1", "causalLayer": "permission", "statement": "ACL 문제다.", "supportingEvidence": [], "contradictingEvidence": [], "state": "open" },
     { "id": "H2", "causalLayer": "state", "statement": "파일 잠금 문제다.", "supportingEvidence": [], "contradictingEvidence": [], "state": "open" }
@@ -16,6 +36,7 @@
   "candidateTests": [
     {
       "checkId": "check-acl",
+      "checkInput": { "target": "dependency-cache", "environmentDigest": "env:local" },
       "question": "ACL을 다시 확인한다.",
       "preconditions": [],
       "risk": "read-only",
@@ -27,7 +48,7 @@
       "stopCondition": "한 번 확인 후 중단한다.",
       "informationGain": 4,
       "cost": 1,
-      "inputDigest": "input:same"
+      "inputDigest": "sha256:6e62d60c29160242c2404de2c4503673cf5480bc3fa7aa43b55d9c4a4e5e340e"
     }
   ],
   "accessBlockers": []

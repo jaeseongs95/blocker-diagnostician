@@ -9,6 +9,7 @@
   "lastKnownGood": null,
   "constraints": [],
   "authorization": { "allowedChecks": [], "approvalRequired": [], "prohibitedChecks": [] },
+  "evidenceBindings": [],
   "attemptedChecks": [],
   "candidateHypotheses": [],
   "candidateTests": [],

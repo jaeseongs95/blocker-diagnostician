@@ -20,7 +20,7 @@ for (const relative of required.filter((item) => item.endsWith(".json"))) {
 try {
   const skill = await readFile(path.join(root, "SKILL.md"), "utf8");
   if (!skill.startsWith("---\nname: blocker-diagnostician\n")) errors.push("SKILL.md name does not match repository name");
-  const scripts = await Promise.all(["core.mjs", "cli.mjs", "cluster-failures.mjs", "validate-report.mjs", "schema-validation.mjs"].map((name) => readFile(path.join(root, "scripts", name), "utf8")));
+  const scripts = await Promise.all(["core.mjs", "cli.mjs", "cluster-failures.mjs", "digest-request.mjs", "validate-report.mjs", "schema-validation.mjs"].map((name) => readFile(path.join(root, "scripts", name), "utf8")));
   if (scripts.some((content) => content.includes("스킬통합플러그인") || content.includes("agent-governance-suite/"))) errors.push("runtime scripts must not import the suite");
 } catch (error) {
   errors.push(error.message);

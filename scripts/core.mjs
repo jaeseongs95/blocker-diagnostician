@@ -41,6 +41,21 @@ function sha256(value) {
   return `sha256:${createHash("sha256").update(canonicalJson(value), "utf8").digest("hex")}`;
 }
 
+export function requestArtifactDigest(request) {
+  return sha256(request);
+}
+
+function canonicalCheckContent(check) {
+  return {
+    checkId: check.checkId,
+    checkInput: structuredClone(check.checkInput)
+  };
+}
+
+export function checkInputDigest(check) {
+  return sha256(canonicalCheckContent(check));
+}
+
 function nonEmptyString(value, name) {
   if (typeof value !== "string" || value.trim().length === 0) throw new InputError(`${name} must be a non-empty string.`);
 }
@@ -78,8 +93,8 @@ export function validateInput(input) {
   if (!Array.isArray(input.attemptedChecks) || !Array.isArray(input.candidateHypotheses) || !Array.isArray(input.candidateTests)) {
     throw new InputError("attemptedChecks, candidateHypotheses, and candidateTests must be arrays.");
   }
-  const hypothesisIds = new Set();
   const evidenceInventory = new Set(input.episodes.flatMap((episode) => episode.evidenceRefs));
+  const hypothesisIds = new Set();
   for (const hypothesis of input.candidateHypotheses) {
     nonEmptyString(hypothesis.id, "hypothesis.id");
     if (hypothesisIds.has(hypothesis.id)) throw new InputError(`Duplicate hypothesis id: ${hypothesis.id}`);
@@ -88,11 +103,40 @@ export function validateInput(input) {
     if (!["input", "state", "permission", "environment", "dependency", "timing", "implementation", "tooling", "unknown"].includes(hypothesis.causalLayer)) throw new InputError(`hypothesis ${hypothesis.id} causalLayer is invalid.`);
     stringArray(hypothesis.supportingEvidence, `hypothesis ${hypothesis.id} supportingEvidence`);
     stringArray(hypothesis.contradictingEvidence, `hypothesis ${hypothesis.id} contradictingEvidence`);
+    const contradicting = new Set(hypothesis.contradictingEvidence);
+    if (hypothesis.supportingEvidence.some((ref) => contradicting.has(ref))) throw new InputError(`hypothesis ${hypothesis.id} cannot use the same evidence as both support and contradiction.`);
     for (const ref of [...hypothesis.supportingEvidence, ...hypothesis.contradictingEvidence]) {
       if (!evidenceInventory.has(ref)) throw new InputError(`hypothesis ${hypothesis.id} references evidence outside the failure episode inventory: ${ref}.`);
     }
     if (!["open", "supported", "refuted", "confirmed"].includes(hypothesis.state)) throw new InputError(`hypothesis ${hypothesis.id} state is invalid.`);
     if (hypothesis.state === "confirmed" && (hypothesis.supportingEvidence.length === 0 || hypothesis.contradictingEvidence.length > 0)) throw new InputError(`confirmed hypothesis ${hypothesis.id} requires supporting evidence and no unresolved contradiction.`);
+  }
+  const confirmedHypotheses = input.candidateHypotheses.filter((item) => item.state === "confirmed");
+  if (confirmedHypotheses.length > 1) throw new InputError("Only one confirmed hypothesis is supported by DiagnosisReport.v1.");
+
+  const bindingKeys = new Set();
+  const evidenceDigests = new Map();
+  for (const binding of input.evidenceBindings) {
+    if (!evidenceInventory.has(binding.evidenceRef)) throw new InputError(`evidence binding references evidence outside the failure episode inventory: ${binding.evidenceRef}.`);
+    for (const id of binding.hypothesisIds) if (!hypothesisIds.has(id)) throw new InputError(`evidence binding references unknown hypothesis ${id}.`);
+    const previousDigest = evidenceDigests.get(binding.evidenceRef);
+    if (previousDigest && previousDigest !== binding.artifactDigest) throw new InputError(`evidence ${binding.evidenceRef} has conflicting artifact digests.`);
+    evidenceDigests.set(binding.evidenceRef, binding.artifactDigest);
+    const key = canonicalJson({ ...binding, hypothesisIds: [...binding.hypothesisIds].sort() });
+    if (bindingKeys.has(key)) throw new InputError(`duplicate evidence binding for ${binding.evidenceRef}.`);
+    bindingKeys.add(key);
+  }
+  for (const hypothesis of input.candidateHypotheses) {
+    for (const evidenceRef of hypothesis.supportingEvidence) {
+      if (!input.evidenceBindings.some((binding) => binding.evidenceRef === evidenceRef && binding.relation === "supports" && binding.hypothesisIds.includes(hypothesis.id))) {
+        throw new InputError(`supporting evidence ${evidenceRef} is not structurally bound to hypothesis ${hypothesis.id}.`);
+      }
+    }
+    for (const evidenceRef of hypothesis.contradictingEvidence) {
+      if (!input.evidenceBindings.some((binding) => binding.evidenceRef === evidenceRef && binding.relation === "refutes" && binding.hypothesisIds.includes(hypothesis.id))) {
+        throw new InputError(`contradicting evidence ${evidenceRef} is not structurally bound to hypothesis ${hypothesis.id}.`);
+      }
+    }
   }
   const testIds = new Set();
   for (const candidate of input.candidateTests) {
@@ -103,17 +147,26 @@ export function validateInput(input) {
   }
   for (const attempt of input.attemptedChecks) {
     nonEmptyString(attempt.checkId, "attempted checkId");
-    nonEmptyString(attempt.inputDigest, `attempted check ${attempt.checkId} inputDigest`);
     nonEmptyString(attempt.resultDigest, `attempted check ${attempt.checkId} resultDigest`);
+    validateCandidateTestContent(attempt.check, hypothesisIds);
+    if (attempt.checkId !== attempt.check.checkId) throw new InputError(`attempted check ${attempt.checkId} does not match embedded check ${attempt.check.checkId}.`);
+    const computedDigest = checkInputDigest(attempt.check);
+    if (attempt.inputDigest !== computedDigest) throw new InputError(`attempted check ${attempt.checkId} inputDigest does not match its canonical check content.`);
   }
 }
 
 function validateCandidateTest(candidate, hypothesisIds) {
+  validateCandidateTestContent(candidate, hypothesisIds);
+  if (candidate.inputDigest !== checkInputDigest(candidate)) throw new InputError(`candidate ${candidate.checkId} inputDigest does not match its canonical check content.`);
+}
+
+function validateCandidateTestContent(candidate, hypothesisIds) {
+  nonEmptyString(candidate.checkId, "candidate test checkId");
+  if (!candidate.checkInput || typeof candidate.checkInput !== "object" || Array.isArray(candidate.checkInput)) throw new InputError(`candidate ${candidate.checkId} checkInput must be an object.`);
   nonEmptyString(candidate.question, `candidate ${candidate.checkId} question`);
   stringArray(candidate.preconditions, `candidate ${candidate.checkId} preconditions`);
   stringArray(candidate.requiredAuthorization, `candidate ${candidate.checkId} requiredAuthorization`);
   nonEmptyString(candidate.stopCondition, `candidate ${candidate.checkId} stopCondition`);
-  nonEmptyString(candidate.inputDigest, `candidate ${candidate.checkId} inputDigest`);
   if (!["read-only", "reversible", "external", "destructive"].includes(candidate.risk)) throw new InputError(`candidate ${candidate.checkId} risk is invalid.`);
   if (!Number.isInteger(candidate.informationGain) || candidate.informationGain < 1 || candidate.informationGain > 5) throw new InputError(`candidate ${candidate.checkId} informationGain must be 1..5.`);
   if (!Number.isInteger(candidate.cost) || candidate.cost < 1 || candidate.cost > 5) throw new InputError(`candidate ${candidate.checkId} cost must be 1..5.`);
@@ -123,6 +176,8 @@ function validateCandidateTest(candidate, hypothesisIds) {
     nonEmptyString(outcome.observation, `candidate ${candidate.checkId} outcome observation`);
     stringArray(outcome.supportsHypotheses, `candidate ${candidate.checkId} supportsHypotheses`);
     stringArray(outcome.refutesHypotheses, `candidate ${candidate.checkId} refutesHypotheses`);
+    const refuted = new Set(outcome.refutesHypotheses);
+    if (outcome.supportsHypotheses.some((id) => refuted.has(id))) throw new InputError(`candidate ${candidate.checkId} outcome cannot both support and refute the same hypothesis.`);
     for (const id of [...outcome.supportsHypotheses, ...outcome.refutesHypotheses]) if (!hypothesisIds.has(id)) throw new InputError(`candidate ${candidate.checkId} references unknown hypothesis ${id}.`);
     implications.add(canonicalJson({ supports: [...outcome.supportsHypotheses].sort(), refutes: [...outcome.refutesHypotheses].sort() }));
   }
@@ -146,7 +201,8 @@ export function clusterFailures(input) {
 const riskRank = { "read-only": 0, reversible: 1, external: 2, destructive: 3 };
 
 function isDuplicate(candidate, attemptedChecks) {
-  return attemptedChecks.some((attempt) => attempt.checkId === candidate.checkId && attempt.inputDigest === candidate.inputDigest);
+  const digest = checkInputDigest(candidate);
+  return attemptedChecks.some((attempt) => attempt.checkId === candidate.checkId && checkInputDigest(attempt.check) === digest);
 }
 
 function rankTests(left, right) {
@@ -163,6 +219,7 @@ function authorizationDisposition(candidate, authorization) {
 
 export function analyzeDiagnosis(input) {
   validateInput(input);
+  const frozenRequestDigest = requestArtifactDigest(input);
   const failureClusters = clusterFailures(input);
   const observations = input.episodes.map((episode, index) => ({
     id: `OBS-${String(index + 1).padStart(3, "0")}`,
@@ -176,6 +233,7 @@ export function analyzeDiagnosis(input) {
   if (input.accessBlockers.length > 0) {
     return {
       schemaVersion: "1.0.0",
+      requestArtifactDigest: frozenRequestDigest,
       failureClusters,
       observations,
       hypotheses,
@@ -190,11 +248,18 @@ export function analyzeDiagnosis(input) {
   if (confirmed) {
     return {
       schemaVersion: "1.0.0",
+      requestArtifactDigest: frozenRequestDigest,
       failureClusters,
       observations,
       hypotheses,
       nextDiscriminatingTest: null,
-      confirmedCause: { hypothesisId: confirmed.id, statement: confirmed.statement, evidenceRefs: [...confirmed.supportingEvidence] },
+      confirmedCause: {
+        hypothesisId: confirmed.id,
+        statement: confirmed.statement,
+        evidenceBindings: input.evidenceBindings
+          .filter((binding) => binding.relation === "supports" && binding.hypothesisIds.includes(confirmed.id) && confirmed.supportingEvidence.includes(binding.evidenceRef))
+          .map((binding) => structuredClone(binding))
+      },
       recommendedNextAction: "Use the confirmed cause as input to a separately authorized remediation task.",
       limitations,
       verdict: "CAUSE_CONFIRMED"
@@ -229,6 +294,7 @@ export function analyzeDiagnosis(input) {
       : "Provide a new discriminating candidate, changed input, or additional evidence; do not repeat an unchanged check.";
   return {
     schemaVersion: "1.0.0",
+    requestArtifactDigest: frozenRequestDigest,
     failureClusters,
     observations,
     hypotheses,
@@ -240,37 +306,53 @@ export function analyzeDiagnosis(input) {
   };
 }
 
-export function validateReport(report, request = null) {
+export function validateReport(report, request = null, frozenRequestArtifactDigest = null) {
   const errors = [];
   if (!report || typeof report !== "object" || Array.isArray(report)) return ["report must be an object"];
-  if (!validateReportSchema(report)) errors.push(`report schema validation failed: ${JSON.stringify(validateReportSchema.errors)}`);
+  const reportSchemaValid = validateReportSchema(report);
+  if (!reportSchemaValid) errors.push(`report schema validation failed: ${JSON.stringify(validateReportSchema.errors)}`);
   if (report.schemaVersion !== "1.0.0") errors.push("report.schemaVersion must be 1.0.0");
+  if (!request) errors.push("the original request is required");
+  if (typeof frozenRequestArtifactDigest !== "string" || !/^sha256:[a-f0-9]{64}$/u.test(frozenRequestArtifactDigest)) errors.push("a valid external frozen request artifact digest is required");
+  if (request && typeof frozenRequestArtifactDigest === "string") {
+    try {
+      validateInput(request);
+      const computed = requestArtifactDigest(request);
+      if (computed !== frozenRequestArtifactDigest) errors.push("the request does not match the external frozen request artifact digest");
+      if (report.requestArtifactDigest !== frozenRequestArtifactDigest) errors.push("report.requestArtifactDigest does not match the external frozen request artifact digest");
+    } catch (error) {
+      errors.push(`request cannot substantiate report: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
   if (!Array.isArray(report.failureClusters)) errors.push("failureClusters must be an array");
   if (!Array.isArray(report.observations)) errors.push("observations must be an array");
   if (!Array.isArray(report.hypotheses)) errors.push("hypotheses must be an array");
   if (!Array.isArray(report.limitations)) errors.push("limitations must be an array");
   if (!["CAUSE_CONFIRMED", "NEXT_TEST", "NEEDS_INPUT", "NEEDS_APPROVAL", "BLOCKED"].includes(report.verdict)) errors.push("verdict is invalid");
-  if (report.verdict === "CAUSE_CONFIRMED") {
-    if (!report.confirmedCause || !Array.isArray(report.confirmedCause.evidenceRefs) || report.confirmedCause.evidenceRefs.length === 0) errors.push("CAUSE_CONFIRMED requires direct evidence");
+  if (reportSchemaValid && report.verdict === "CAUSE_CONFIRMED") {
+    if (!report.confirmedCause || !Array.isArray(report.confirmedCause.evidenceBindings) || report.confirmedCause.evidenceBindings.length === 0) errors.push("CAUSE_CONFIRMED requires structurally bound direct evidence");
     const hypothesis = report.hypotheses?.find((item) => item.id === report.confirmedCause?.hypothesisId);
     if (!hypothesis || hypothesis.state !== "confirmed" || hypothesis.contradictingEvidence?.length > 0) errors.push("confirmedCause must reference an uncontradicted confirmed hypothesis");
-    if (!request) errors.push("the request is required to bind confirmed evidence to the failure episode inventory");
-    else {
-      const inventory = new Set(request.episodes.flatMap((episode) => episode.evidenceRefs));
-      for (const ref of report.confirmedCause?.evidenceRefs ?? []) if (!inventory.has(ref)) errors.push(`confirmedCause references evidence outside the failure episode inventory: ${ref}`);
+    if (request) {
+      for (const binding of report.confirmedCause?.evidenceBindings ?? []) {
+        const matching = request.evidenceBindings?.some((item) => canonicalJson(item) === canonicalJson(binding));
+        if (!matching || binding.relation !== "supports" || !binding.hypothesisIds.includes(report.confirmedCause.hypothesisId)) {
+          errors.push(`confirmedCause evidence ${binding.evidenceRef} is not bound to hypothesis ${report.confirmedCause.hypothesisId} in the frozen request`);
+        }
+      }
     }
   }
-  if (["NEXT_TEST", "NEEDS_APPROVAL"].includes(report.verdict)) {
+  if (reportSchemaValid && ["NEXT_TEST", "NEEDS_APPROVAL"].includes(report.verdict)) {
     const candidate = report.nextDiscriminatingTest;
     if (!candidate) errors.push(`${report.verdict} requires nextDiscriminatingTest`);
     else {
       const implications = new Set((candidate.outcomes ?? []).map((outcome) => canonicalJson({ supports: [...(outcome.supportsHypotheses ?? [])].sort(), refutes: [...(outcome.refutesHypotheses ?? [])].sort() })));
       if (!Array.isArray(candidate.outcomes) || candidate.outcomes.length < 2 || implications.size < 2) errors.push("next test must have discriminating outcomes");
       if (!candidate.stopCondition) errors.push("next test requires a stop condition");
-      if (request?.attemptedChecks?.some((attempt) => attempt.checkId === candidate.checkId && attempt.inputDigest === candidate.inputDigest)) errors.push("next test repeats an attempted check without changed input");
+      if (request?.attemptedChecks?.some((attempt) => attempt.checkId === candidate.checkId && checkInputDigest(attempt.check) === checkInputDigest(candidate))) errors.push("next test repeats an attempted check without changed canonical check content");
     }
   }
-  if (request && Array.isArray(report.failureClusters)) {
+  if (reportSchemaValid && request && Array.isArray(report.failureClusters)) {
     try {
       const expected = analyzeDiagnosis(request);
       const expectedIds = request.episodes.map((item) => item.attemptId).sort();
