@@ -1,6 +1,6 @@
 {
   "name": "blocker-diagnostician",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Separate repeated failures into causal hypotheses and select the next discriminating test.",
   "type": "module",
   "bin": {
